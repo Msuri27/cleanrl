@@ -4,7 +4,8 @@ from gymnasium.envs.registration import register
 from gymnasium.envs.mujoco.ant_v4 import AntEnv
 
 class AntBackflipEnv(AntEnv):
-
+    def __init__(self, **kwargs):
+        super().__init__(terminate_when_unhealthy=False, **kwargs)
 
     def reset(self, *, seed=None, options=None):
         observation, info = super().reset(seed=seed, options=options)
@@ -16,7 +17,7 @@ class AntBackflipEnv(AntEnv):
 
         return observation, info
 
-    def _foot_contact_count(self):
+    def _foot_contact_count(self) -> int:
         floor_id = self.model.geom("floor").id
         foot_ids = {
             self.model.geom(name).id
@@ -96,17 +97,20 @@ class AntBackflipEnv(AntEnv):
                     and abs(float(observation[16])) < 0.2
                     and abs(pitch_velocity) < 0.2
                     and abs(float(observation[18])) < 0.2
-                    and self._foot_contact_count >= 2
+                    and self._foot_contact_count() >= 2
                 )
 
                 if stable:
                     self.lb_counter += 1
                     if self.lb_counter == 25:       # healthy landing pose for multiple steps
                         base_reward += landing_bonus
-                        self.state = "Done"
-
-                # reset counter on failure
-                self.lb_counter = 0
+                        # state reset
+                        self.state = "Takeoff"
+                        self.start_z = z_height
+                        self.passed_inverted = False
+                        self.lb_counter = 0
+                else:
+                    self.lb_counter = 0
 
         # penalties
         r_lateral = -weight_y * float(observation[14]) ** 2
@@ -117,4 +121,7 @@ class AntBackflipEnv(AntEnv):
 
         return observation, base_reward, terminated, truncated, info
     
-register(id="AntBackflip-v0", entry_point="matt_ant_env:AntBackflipEnv", max_episode_steps=10000)
+register(id="AntBackflip-v0",
+         entry_point="matt_ant_env:AntBackflipEnv", 
+         max_episode_steps=1000
+)
