@@ -14,6 +14,8 @@ class AntBackflipEnv(AntEnv):
         self.passed_inverted = False
         self.state =  "Takeoff"
         self.lb_counter = 0
+        self.entered_flip = False
+        self.entered_land = False
 
         return observation, info
 
@@ -44,23 +46,26 @@ class AntBackflipEnv(AntEnv):
         # replace ant default reward
         base_reward = 0.0
 
-        # define weight constants
-        weight_height = 1.0
-        weight_z = 1.0
-        weight_y = 1.0
-        weight_pitch = 1.0
-        weight_roll = 1.0
-        weight_yaw = 1.0
+        # reward rates are multiplied by self.dt so their scale is less dependent
+        # on the environment's control frequency.
+        weight_height = 10.0
+        weight_z = 2.0
+        weight_flip = 1.0
+        weight_y = 0.05
+        weight_pitch = 0.05
+        weight_roll = 0.02
+        weight_yaw = 0.02
 
         # phase transition bonuses
-        launch_bonus = 1.0
-        flip_bonus = 1.0
-        landing_bonus = 1.0
+        launch_bonus = 5.0
+        flip_bonus = 10.0
+        landing_bonus = 5.0
 
         # phase one
         z_height = float(observation[0])
         height_gain = z_height - self.start_z
         vertical_velocity = float(observation[15])
+        penalize_off_axis_motion = self.state in ("Flip", "Land")
 
          # phase two and three
         w, qx, qy, qz = map(float, observation[1:5])
@@ -69,14 +74,15 @@ class AntBackflipEnv(AntEnv):
 
         match self.state:
             case "Takeoff":
-                r_takeoff = weight_z * max(vertical_velocity, 0.0)
+                r_takeoff = weight_z * max(vertical_velocity, 0.0) * self.dt
                 base_reward += r_takeoff
 
-                if height_gain >= 0.25 and vertical_velocity > 0.0:
+                if height_gain >= 0.15 and vertical_velocity > 0.0:
                     base_reward += launch_bonus 
                     self.state = "Flip"
+                    self.entered_flip = True
             case "Flip":
-                r_flip = max(-pitch_velocity, 0.0)
+                r_flip = weight_flip * max(-pitch_velocity, 0.0) * self.dt
                 base_reward += r_flip
             
                 if torso_up < 0.0:
@@ -84,10 +90,11 @@ class AntBackflipEnv(AntEnv):
                 if self.passed_inverted and torso_up > 0.8:
                     base_reward += flip_bonus
                     self.state = "Land"
+                    self.entered_land = True
             case "Land":
-                r_pitch = -weight_pitch * pitch_velocity ** 2
-                r_land = -weight_height * height_gain ** 2       # want low difference in height
-                r_orientation = torso_up        # +1 is the best -1 is the worst
+                r_pitch = -weight_pitch * pitch_velocity ** 2 * self.dt
+                r_land = -weight_height * height_gain ** 2 * self.dt
+                r_orientation = torso_up * self.dt
                 base_reward += r_pitch + r_land + r_orientation
 
                 stable = (
@@ -112,12 +119,14 @@ class AntBackflipEnv(AntEnv):
                 else:
                     self.lb_counter = 0
 
-        # penalties
-        r_lateral = -weight_y * float(observation[14]) ** 2
-        r_roll = -weight_roll * float(observation[16]) ** 2
-        r_yaw = -weight_yaw * float(observation[18]) ** 2
+        if penalize_off_axis_motion:
+            r_lateral = -weight_y * float(observation[14]) ** 2 * self.dt
+            r_roll = -weight_roll * float(observation[16]) ** 2 * self.dt
+            r_yaw = -weight_yaw * float(observation[18]) ** 2 * self.dt
+            base_reward += r_lateral + r_roll + r_yaw
 
-        base_reward += r_lateral + r_roll + r_yaw
+        info["entered_flip"] = self.entered_flip
+        info["entered_land"] = self.entered_land
 
         return observation, base_reward, terminated, truncated, info
     

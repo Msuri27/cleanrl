@@ -229,6 +229,19 @@ if __name__ == "__main__":
                         print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                         writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                         writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                        if "entered_flip" in info and "entered_land" in info:
+                            entered_flip = bool(info["entered_flip"])
+                            entered_land = bool(info["entered_land"])
+                            print(
+                                f"episode reached Flip={entered_flip}, "
+                                f"reached Land={entered_land}"
+                            )
+                            writer.add_scalar(
+                                "charts/episode_reached_flip", int(entered_flip), global_step
+                            )
+                            writer.add_scalar(
+                                "charts/episode_reached_land", int(entered_land), global_step
+                            )
 
         # bootstrap value if not done
         with torch.no_grad():
