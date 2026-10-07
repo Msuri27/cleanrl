@@ -13,6 +13,7 @@ import torch.optim as optim
 import tyro
 from torch.utils.tensorboard import SummaryWriter
 
+import matt_ant_env
 from cleanrl_utils.buffers import ReplayBuffer
 
 
@@ -218,6 +219,8 @@ if __name__ == "__main__":
         handle_timeout_termination=False,
     )
     start_time = time.time()
+    global_max_height_gain = 0.0
+    episodes_reached_hold = 0
 
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset(seed=args.seed)
@@ -231,6 +234,15 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        if "episode_max_height_gain" in infos:
+            global_max_height_gain = max(
+                global_max_height_gain,
+                float(np.max(infos["episode_max_height_gain"])),
+            )
+            if global_step % 100 == 0:
+                writer.add_scalar(
+                    "charts/global_max_height_gain", global_max_height_gain, global_step
+                )
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         if "final_info" in infos:
@@ -239,7 +251,17 @@ if __name__ == "__main__":
                     print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                     writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                     writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-                    break
+                    if "entered_hold" in info:
+                        entered_hold = bool(info["entered_hold"])
+                        episodes_reached_hold += int(entered_hold)
+                        writer.add_scalar(
+                            "charts/episode_reached_hold", int(entered_hold), global_step
+                        )
+                        writer.add_scalar(
+                            "charts/episodes_reached_hold",
+                            episodes_reached_hold,
+                            global_step,
+                        )
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
         real_next_obs = next_obs.copy()

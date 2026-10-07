@@ -193,6 +193,8 @@ if __name__ == "__main__":
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
+    global_max_height_gain = 0.0
+    episodes_reached_hold = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
@@ -219,6 +221,15 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+            if "episode_max_height_gain" in infos:
+                global_max_height_gain = max(
+                    global_max_height_gain,
+                    float(np.max(infos["episode_max_height_gain"])),
+                )
+                if global_step % 100 == 0:
+                    writer.add_scalar(
+                        "charts/global_max_height_gain", global_max_height_gain, global_step
+                    )
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
@@ -241,6 +252,17 @@ if __name__ == "__main__":
                             )
                             writer.add_scalar(
                                 "charts/episode_reached_land", int(entered_land), global_step
+                            )
+                        if "entered_hold" in info:
+                            entered_hold = bool(info["entered_hold"])
+                            episodes_reached_hold += int(entered_hold)
+                            writer.add_scalar(
+                                "charts/episode_reached_hold", int(entered_hold), global_step
+                            )
+                            writer.add_scalar(
+                                "charts/episodes_reached_hold",
+                                episodes_reached_hold,
+                                global_step,
                             )
 
         # bootstrap value if not done
