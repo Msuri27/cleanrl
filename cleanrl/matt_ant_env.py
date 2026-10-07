@@ -48,8 +48,8 @@ class AntBackflipEnv(AntEnv):
 
         # reward rates are multiplied by self.dt so their scale is less dependent
         # on the environment's control frequency.
-        weight_height = 10.0
-        weight_z = 2.0
+        weight_height = 2.0
+        weight_z = 3.0
         weight_flip = 1.0
         weight_y = 0.05
         weight_pitch = 0.05
@@ -60,6 +60,8 @@ class AntBackflipEnv(AntEnv):
         launch_bonus = 5.0
         flip_bonus = 10.0
         landing_bonus = 5.0
+        launch_height_gain = 0.25
+        stable_landing_steps = 50
 
         # phase one
         z_height = float(observation[0])
@@ -77,7 +79,7 @@ class AntBackflipEnv(AntEnv):
                 r_takeoff = weight_z * max(vertical_velocity, 0.0) * self.dt
                 base_reward += r_takeoff
 
-                if height_gain >= 0.15 and vertical_velocity > 0.0:
+                if height_gain >= launch_height_gain and vertical_velocity > 0.0:
                     base_reward += launch_bonus 
                     self.state = "Flip"
                     self.entered_flip = True
@@ -109,7 +111,7 @@ class AntBackflipEnv(AntEnv):
 
                 if stable:
                     self.lb_counter += 1
-                    if self.lb_counter == 25:       # healthy landing pose for multiple steps
+                    if self.lb_counter == stable_landing_steps:
                         base_reward += landing_bonus
                         # state reset
                         self.state = "Takeoff"
