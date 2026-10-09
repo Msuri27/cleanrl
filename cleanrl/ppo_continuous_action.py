@@ -221,6 +221,22 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+            if "hold_entered_this_step" in infos:
+                for env_idx, entered_hold in enumerate(infos["hold_entered_this_step"]):
+                    if entered_hold:
+                        writer.add_scalar(
+                            "charts/land_to_hold_seconds",
+                            infos["land_to_hold_seconds"][env_idx],
+                            global_step,
+                        )
+            if "takeoff_completed" in infos:
+                for env_idx, completed in enumerate(infos["takeoff_completed"]):
+                    if completed:
+                        writer.add_scalar(
+                            "charts/takeoff_peak_height_gain",
+                            infos["takeoff_peak_height_gain"][env_idx],
+                            global_step,
+                        )
             if "episode_max_height_gain" in infos:
                 global_max_height_gain = max(
                     global_max_height_gain,
@@ -243,9 +259,11 @@ if __name__ == "__main__":
                         if "entered_flip" in info and "entered_land" in info:
                             entered_flip = bool(info["entered_flip"])
                             entered_land = bool(info["entered_land"])
+                            entered_hold = bool(info.get("entered_hold", False))
                             print(
                                 f"episode reached Flip={entered_flip}, "
-                                f"reached Land={entered_land}"
+                                f"reached Land={entered_land}, "
+                                f"reached Hold={entered_hold}"
                             )
                             writer.add_scalar(
                                 "charts/episode_reached_flip", int(entered_flip), global_step
@@ -262,6 +280,18 @@ if __name__ == "__main__":
                             writer.add_scalar(
                                 "charts/episodes_reached_hold",
                                 episodes_reached_hold,
+                                global_step,
+                            )
+                        if "episode_max_stable_hold_steps" in info:
+                            writer.add_scalar(
+                                "charts/episode_max_stable_hold_steps",
+                                info["episode_max_stable_hold_steps"],
+                                global_step,
+                            )
+                        if "episode_max_land_elapsed_seconds" in info:
+                            writer.add_scalar(
+                                "charts/episode_max_land_elapsed_seconds",
+                                info["episode_max_land_elapsed_seconds"],
                                 global_step,
                             )
 

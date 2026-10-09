@@ -35,6 +35,8 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    save_model: bool = False
+    """whether to save the policy weights into the `runs/{run_name}` folder"""
 
     # Algorithm specific arguments
     env_id: str = "Hopper-v4"
@@ -234,6 +236,22 @@ if __name__ == "__main__":
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        if "hold_entered_this_step" in infos:
+            for env_idx, entered_hold in enumerate(infos["hold_entered_this_step"]):
+                if entered_hold:
+                    writer.add_scalar(
+                        "charts/land_to_hold_seconds",
+                        infos["land_to_hold_seconds"][env_idx],
+                        global_step,
+                    )
+        if "takeoff_completed" in infos:
+            for env_idx, completed in enumerate(infos["takeoff_completed"]):
+                if completed:
+                    writer.add_scalar(
+                        "charts/takeoff_peak_height_gain",
+                        infos["takeoff_peak_height_gain"][env_idx],
+                        global_step,
+                    )
         if "episode_max_height_gain" in infos:
             global_max_height_gain = max(
                 global_max_height_gain,
@@ -251,6 +269,14 @@ if __name__ == "__main__":
                     print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
                     writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
                     writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+                    for phase in ("flip", "land", "hold"):
+                        key = f"entered_{phase}"
+                        if key in info:
+                            writer.add_scalar(
+                                f"charts/episode_reached_{phase}",
+                                int(bool(info[key])),
+                                global_step,
+                            )
                     if "entered_hold" in info:
                         entered_hold = bool(info["entered_hold"])
                         episodes_reached_hold += int(entered_hold)
@@ -260,6 +286,18 @@ if __name__ == "__main__":
                         writer.add_scalar(
                             "charts/episodes_reached_hold",
                             episodes_reached_hold,
+                            global_step,
+                        )
+                    if "episode_max_stable_hold_steps" in info:
+                        writer.add_scalar(
+                            "charts/episode_max_stable_hold_steps",
+                            info["episode_max_stable_hold_steps"],
+                            global_step,
+                        )
+                    if "episode_max_land_elapsed_seconds" in info:
+                        writer.add_scalar(
+                            "charts/episode_max_land_elapsed_seconds",
+                            info["episode_max_land_elapsed_seconds"],
                             global_step,
                         )
 
@@ -341,6 +379,11 @@ if __name__ == "__main__":
                 )
                 if args.autotune:
                     writer.add_scalar("losses/alpha_loss", alpha_loss.item(), global_step)
+
+    if args.save_model:
+        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        torch.save(actor.state_dict(), model_path)
+        print(f"model saved to {model_path}")
 
     envs.close()
     writer.close()
