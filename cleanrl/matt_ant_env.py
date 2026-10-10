@@ -4,7 +4,7 @@ from gymnasium.envs.registration import register
 from gymnasium.envs.mujoco.ant_v4 import AntEnv
 
 class AntBackflipEnv(AntEnv):
-    phases = ("Takeoff", "Flip", "Land", "Hold")
+    phases = ("Takeoff", "Flip", "Land")
 
     def __init__(self, **kwargs):
         super().__init__(terminate_when_unhealthy=False, **kwargs)
@@ -26,13 +26,14 @@ class AntBackflipEnv(AntEnv):
         self.state =  "Takeoff"
         self.land_elapsed_steps = 0
         self.episode_max_land_elapsed_steps = 0
-        self.lb_counter = 0
-        self.hold_counter = 0
-        self.hold_stable_counter = 0
-        self.episode_max_stable_hold_steps = 0
+        self.three_foot_stable_steps = 0
+        self.two_foot_stable_steps = 0
+        self.completed_backflips = 0
+        self.timely_landings = 0
+        self.high_quality_landings = 0
+        self.two_foot_landings = 0
         self.entered_flip = False
         self.entered_land = False
-        self.entered_hold = False
 
         return observation, info
 
@@ -65,25 +66,26 @@ class AntBackflipEnv(AntEnv):
 
         # reward rates are multiplied by self.dt so their scale is less dependent
         # on the environment's control frequency.
-        weight_hold_height = 2.0
         weight_z = 3.0
         weight_flip = 1.0
-        weight_y = 0.05
+        weight_y = 0.025
         weight_pitch = 0.05
-        weight_roll = 0.02
-        weight_yaw = 0.02
+        weight_roll = 0.01
+        weight_yaw = 0.01
         weight_takeoff_orientation = 0.5
+        weight_active_phase_delay = 0.25
         weight_stable = 0.5
         weight_land_delay = 1.5
-        weight_hold_velocity = 0.05
 
         # phase transition bonuses
         launch_bonus = 5.0
         flip_bonus = 6.0
         landing_bonus = 5.0
-        launch_height_gain = 0.3
-        stable_landing_steps = 5
-        hold_steps = 40
+        two_foot_landing_bonus = 2.0
+        launch_height_gain = 1.0
+        three_foot_stability_steps = round(0.5 / self.dt)
+        two_foot_stability_steps = round(1.0 / self.dt)
+        successful_landing_deadline = 2.0
 
         # phase one
         z_height = float(observation[0])
@@ -100,28 +102,32 @@ class AntBackflipEnv(AntEnv):
         torso_up = 1.0 - 2.0 * (qx * qx + qy * qy)
         pitch_velocity = float(observation[17])
         takeoff_completed = False
-        hold_entered_this_step = False
-        land_to_hold_seconds = 0.0
+        stable_landing_this_step = False
+        land_to_stable_seconds = 0.0
 
-        stable = False
-        if self.state in ("Land", "Hold"):
-            stable = (
+        stable_pose = False
+        foot_contacts = 0
+        if self.state == "Land":
+            stable_pose = (
                 torso_up > 0.9
                 and abs(height_gain) < 0.1
                 and abs(vertical_velocity) < 0.1
                 and abs(float(observation[16])) < 0.2
                 and abs(pitch_velocity) < 0.2
                 and abs(float(observation[18])) < 0.2
-                and self._foot_contact_count() >= 3
             )
+            foot_contacts = self._foot_contact_count()
 
         match self.state:
             case "Takeoff":
                 self.takeoff_peak_height_gain = max(
                     self.takeoff_peak_height_gain, height_gain
                 )
+                base_reward -= weight_active_phase_delay * self.dt
                 r_takeoff = weight_z * max(vertical_velocity, 0.0) * self.dt
-                r_takeoff_orientation = weight_takeoff_orientation * torso_up * self.dt
+                r_takeoff_orientation = (
+                    weight_takeoff_orientation * (torso_up - 1.0) * self.dt
+                )
                 base_reward += r_takeoff + r_takeoff_orientation
 
                 if height_gain >= launch_height_gain and vertical_velocity > 0.0:
@@ -130,6 +136,7 @@ class AntBackflipEnv(AntEnv):
                     self.entered_flip = True
                     takeoff_completed = True
             case "Flip":
+                base_reward -= weight_active_phase_delay * self.dt
                 r_flip = weight_flip * max(-pitch_velocity, 0.0) * self.dt
                 base_reward += r_flip
             
@@ -139,6 +146,7 @@ class AntBackflipEnv(AntEnv):
                     base_reward += flip_bonus
                     self.state = "Land"
                     self.entered_land = True
+                    self.completed_backflips += 1
                     self.land_elapsed_steps = 0
             case "Land":
                 self.land_elapsed_steps += 1
@@ -150,50 +158,41 @@ class AntBackflipEnv(AntEnv):
                 r_orientation = torso_up * self.dt
                 base_reward += r_pitch + r_orientation
 
-                if stable:
-                    self.lb_counter += 1
-                    base_reward += weight_stable * self.dt
-                    if self.lb_counter == stable_landing_steps:
-                        base_reward += landing_bonus
-                        hold_entered_this_step = True
-                        land_to_hold_seconds = self.land_elapsed_steps * self.dt
-                        self.state = "Hold"
-                        self.entered_hold = True
-                        self.start_z = z_height
-                        self.passed_inverted = False
-                        self.lb_counter = 0
-                        self.land_elapsed_steps = 0
-                        self.hold_counter = 0
-                        self.hold_stable_counter = 0
+                if stable_pose and foot_contacts >= 3:
+                    self.three_foot_stable_steps += 1
                 else:
-                    self.lb_counter = 0
-            case "Hold":
-                linear_velocity_sq = sum(float(v) ** 2 for v in observation[13:16])
-                angular_velocity_sq = sum(float(v) ** 2 for v in observation[16:19])
-                r_hold_velocity = -weight_hold_velocity * (
-                    linear_velocity_sq + angular_velocity_sq
-                ) * self.dt
-                r_hold_pose = (
-                    torso_up * self.dt - weight_hold_height * height_gain ** 2 * self.dt
-                )
-                base_reward += r_hold_velocity + r_hold_pose
-                if stable:
-                    base_reward += weight_stable * self.dt
-                    self.hold_stable_counter += 1
-                    self.episode_max_stable_hold_steps = max(
-                        self.episode_max_stable_hold_steps, self.hold_stable_counter
-                    )
-                else:
-                    self.hold_stable_counter = 0
+                    self.three_foot_stable_steps = 0
 
-                self.hold_counter += 1
-                if self.hold_counter >= hold_steps:
+                if stable_pose and foot_contacts >= 2:
+                    self.two_foot_stable_steps += 1
+                else:
+                    self.two_foot_stable_steps = 0
+
+                if stable_pose and foot_contacts >= 2:
+                    base_reward += weight_stable * self.dt
+
+                landing_quality = 0
+                if self.three_foot_stable_steps >= three_foot_stability_steps:
+                    landing_quality = 3
+                    base_reward += landing_bonus
+                    self.high_quality_landings += 1
+                elif self.two_foot_stable_steps >= two_foot_stability_steps:
+                    landing_quality = 2
+                    base_reward += two_foot_landing_bonus
+                    self.two_foot_landings += 1
+
+                if landing_quality:
+                    stable_landing_this_step = True
+                    land_to_stable_seconds = self.land_elapsed_steps * self.dt
+                    if land_to_stable_seconds <= successful_landing_deadline:
+                        self.timely_landings += 1
                     self.state = "Takeoff"
                     self.start_z = z_height
                     self.takeoff_peak_height_gain = 0.0
                     self.passed_inverted = False
-                    self.hold_counter = 0
-                    self.hold_stable_counter = 0
+                    self.three_foot_stable_steps = 0
+                    self.two_foot_stable_steps = 0
+                    self.land_elapsed_steps = 0
 
         if penalize_off_axis_motion:
             r_lateral = -weight_y * float(observation[14]) ** 2 * self.dt
@@ -203,15 +202,17 @@ class AntBackflipEnv(AntEnv):
 
         info["entered_flip"] = self.entered_flip
         info["entered_land"] = self.entered_land
-        info["entered_hold"] = self.entered_hold
-        info["episode_max_stable_hold_steps"] = self.episode_max_stable_hold_steps
+        info["true_performance"] = self.completed_backflips
+        info["timely_landings"] = self.timely_landings
+        info["high_quality_landings"] = self.high_quality_landings
+        info["two_foot_landings"] = self.two_foot_landings
         info["episode_max_land_elapsed_seconds"] = (
             self.episode_max_land_elapsed_steps * self.dt
         )
         info["takeoff_completed"] = takeoff_completed
         info["takeoff_peak_height_gain"] = self.takeoff_peak_height_gain
-        info["hold_entered_this_step"] = hold_entered_this_step
-        info["land_to_hold_seconds"] = land_to_hold_seconds
+        info["stable_landing_this_step"] = stable_landing_this_step
+        info["land_to_stable_seconds"] = land_to_stable_seconds
 
         return observation, base_reward, terminated, truncated, info
 
@@ -225,8 +226,8 @@ class AntPhaseObservation(gym.ObservationWrapper):
 
         self.ant_env = env
         self.observation_space = gym.spaces.Box(
-            low=np.concatenate((base_space.low, np.zeros(5, dtype=base_space.dtype))),
-            high=np.concatenate((base_space.high, np.ones(5, dtype=base_space.dtype))),
+            low=np.concatenate((base_space.low, np.zeros(4, dtype=base_space.dtype))),
+            high=np.concatenate((base_space.high, np.ones(4, dtype=base_space.dtype))),
             dtype=np.float64,
         )
 

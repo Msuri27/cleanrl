@@ -194,7 +194,6 @@ if __name__ == "__main__":
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     global_max_height_gain = 0.0
-    episodes_reached_hold = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
@@ -221,12 +220,12 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
-            if "hold_entered_this_step" in infos:
-                for env_idx, entered_hold in enumerate(infos["hold_entered_this_step"]):
-                    if entered_hold:
+            if "stable_landing_this_step" in infos:
+                for env_idx, stable_landing in enumerate(infos["stable_landing_this_step"]):
+                    if stable_landing:
                         writer.add_scalar(
-                            "charts/land_to_hold_seconds",
-                            infos["land_to_hold_seconds"][env_idx],
+                            "charts/land_to_stable_seconds",
+                            infos["land_to_stable_seconds"][env_idx],
                             global_step,
                         )
             if "takeoff_completed" in infos:
@@ -259,11 +258,10 @@ if __name__ == "__main__":
                         if "entered_flip" in info and "entered_land" in info:
                             entered_flip = bool(info["entered_flip"])
                             entered_land = bool(info["entered_land"])
-                            entered_hold = bool(info.get("entered_hold", False))
                             print(
                                 f"episode reached Flip={entered_flip}, "
                                 f"reached Land={entered_land}, "
-                                f"reached Hold={entered_hold}"
+                                f"successful backflips={info.get('true_performance', 0)}"
                             )
                             writer.add_scalar(
                                 "charts/episode_reached_flip", int(entered_flip), global_step
@@ -271,21 +269,28 @@ if __name__ == "__main__":
                             writer.add_scalar(
                                 "charts/episode_reached_land", int(entered_land), global_step
                             )
-                        if "entered_hold" in info:
-                            entered_hold = bool(info["entered_hold"])
-                            episodes_reached_hold += int(entered_hold)
+                        if "true_performance" in info:
                             writer.add_scalar(
-                                "charts/episode_reached_hold", int(entered_hold), global_step
-                            )
-                            writer.add_scalar(
-                                "charts/episodes_reached_hold",
-                                episodes_reached_hold,
+                                "charts/true_performance",
+                                info["true_performance"],
                                 global_step,
                             )
-                        if "episode_max_stable_hold_steps" in info:
+                        if "timely_landings" in info:
                             writer.add_scalar(
-                                "charts/episode_max_stable_hold_steps",
-                                info["episode_max_stable_hold_steps"],
+                                "charts/timely_landings",
+                                info["timely_landings"],
+                                global_step,
+                            )
+                        if "high_quality_landings" in info:
+                            writer.add_scalar(
+                                "charts/high_quality_landings",
+                                info["high_quality_landings"],
+                                global_step,
+                            )
+                        if "two_foot_landings" in info:
+                            writer.add_scalar(
+                                "charts/two_foot_landings",
+                                info["two_foot_landings"],
                                 global_step,
                             )
                         if "episode_max_land_elapsed_seconds" in info:
